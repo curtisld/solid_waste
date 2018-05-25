@@ -1,0 +1,748 @@
+---
+title: "Vashon Landfill Report Template"
+author: "Curtis DeGasperi"
+date: "May 9, 2018"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+always_allow_html: yes
+---
+
+```{r vashon_groundwater_piper_plots, echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+library(knitr)
+library(kableExtra)
+library(tinytex)
+
+quarters <- c('First','Second','Third','Fourth')
+
+# Set reporting quarter to work with
+year <- 2017
+quarter <- 3
+
+# Starting from machine readable files (assume sheet = 'Sheet1')
+gw_lab_file <- 'VALF - GW Analytical Data - 20000101 to 20180424.xlsx'
+gw_field_file <- 'VALF - GW Field Data - 20000101 to 20180426.xlsx'
+dw_lab_file <- 'tmp260E.xlsx'
+dw_field_file <- 'tmp2A82.xlsx' 
+
+###########################################
+# charge balance and piper plot test
+# Vashon Q3 2017 report
+
+library(readxl)
+library(openxlsx)
+library(tidyr)
+library(smwrGraphs)
+
+options(scipen=8,digits=7)
+
+#############################
+# read groundwter well laboratory data file
+#############################
+# df <- read_excel(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',gw_lab_file),'Sheet1')
+# df <- read_excel('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/VALF - GW Analytical Data - 20000101 to 20180424.xlsx','Sheet1')
+df <- read.xlsx(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',gw_lab_file),'Sheet1')
+df$sample_date <-  as.POSIXct(df$sample_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+
+# use only reportable results
+df <- dplyr::filter(df,df$reportable_result == 'Yes')
+
+##################################################
+# identify which quarter each value corresponds to
+##################################################
+df$Quarter <- quarter(df$sample_date)
+
+# add year and month to be complete
+df$Year <- year(df$sample_date)
+df$Month <- month(df$sample_date)
+df$Date <- as.Date(df$sample_date)
+
+# filter to year and quarter specified above
+# df <-  dplyr::filter(df,Year == year)
+# df <-  dplyr::filter(df,Month >6 & Month <10)
+df <- dplyr::filter(df,Year==year & Quarter == quarter)
+
+#########################
+# Using half of the detection limit for non-detects
+# ...probably not much more that can be done about that here
+# ...generally the 
+#########################
+df$Value <- ifelse(df$detect_flag=='N',df$report_result_value/2,df$report_result_value)
+
+# filter to selected cations and anions
+df_l <-  dplyr::filter(df,df$chemical_name %in% c("CALCIUM","MAGNESIUM","SODIUM","POTASSIUM","IRON","MANGANESE","SULFATE","CHLORIDE","FLUORIDE","NITRATE","AMMONIA AS N","ALKALINITY, TOTAL (AS CACO3)","TOTAL DISSOLVED SOLIDS"))
+
+##########################################
+# filter to dissolved ('D') or 'N'
+# ########################################
+df_l <-  dplyr::filter(df_l,df_l$fraction %in% c("N","D"))
+
+##########################
+# Just selecting columns to work with to keep next steps clean/small
+##########################
+df_l <- dplyr::select(df_l, sys_loc_code, Date, chemical_name, Value)
+
+#############################
+# read groundwter well field data file
+#############################
+#df <- read_excel(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',gw_field_file),'Sheet1')
+df <- read.xlsx(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',gw_field_file),'Sheet1')
+df$measurement_date <-  as.POSIXct(df$measurement_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+
+##################################################
+# identify which quarter each value corresponds to
+##################################################
+df$Quarter <- quarter(df$measurement_date)
+
+# add year and month to be complete
+df$Year <- year(df$measurement_date)
+df$Month <- month(df$measurement_date)
+df$Date <- as.Date(df$measurement_date)
+
+# filter to year and quarter specified above
+# df <-  dplyr::filter(df,Year == year)
+# df <-  dplyr::filter(df,Month >6 & Month <10)
+df <- dplyr::filter(df,Year==year & Quarter == quarter)
+
+df_f <- df
+
+########################################################
+# remove duplicates - not sure this is foolproof or if
+# duplicates should be averaged
+########################################################
+df_f$dup <- ifelse(substr(df_f$sys_sample_code,nchar(df_f$sys_sample_code),nchar(df_f$sys_sample_code))=='D','dup','S')
+
+df_f <- dplyr::filter(df_f,dup =='S')
+
+##########################
+# Just selecting columns to work with to keep next steps clean/small
+##########################
+df_f$Value <- df_f$param_value
+df_f <- dplyr::select(df_f, sys_loc_code, Date,param_code, Value)
+
+# rename some columns so we can bind the lab and field data together
+# df_f <- dplyr::rename(df_f, report_result_value = 'param_value', chemical_name = 'param_code' )
+df_f <- dplyr::rename(df_f, chemical_name = 'param_code' )
+
+# binding groundwater lab and field data
+df_p <- rbind(df_l,df_f)
+
+#############################
+# read drinking water well laboratory data file
+#############################
+#df <- read_excel(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',dw_lab_file),'Sheet1')
+df <- read.xlsx(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',dw_lab_file),'Sheet1')
+df$sample_date <-  as.POSIXct(df$sample_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+
+# use only reportable results
+df <- dplyr::filter(df,df$reportable_result == 'Yes')
+
+##################################################
+# identify which quarter each value corresponds to
+##################################################
+df$Quarter <- quarter(df$sample_date)
+
+# add year and month to be complete
+df$Year <- year(df$sample_date)
+df$Month <- month(df$sample_date)
+df$Date <- as.Date(df$sample_date)
+
+# filter to year and quarter specified above
+# df <-  dplyr::filter(df,Year == year)
+# df <-  dplyr::filter(df,Month >6 & Month <10)
+df <- dplyr::filter(df,Year==year & Quarter == quarter)
+
+#########################
+# Using half of the detection limit for non-detects
+# ...probably not much more that can be done about that here
+# ...generally the 
+#########################
+df$Value <- ifelse(df$detect_flag=='N',df$report_result_value/2,df$report_result_value)
+
+# filter to selected cations and anions
+df_l <-  dplyr::filter(df,df$chemical_name %in% c("CALCIUM","MAGNESIUM","SODIUM","POTASSIUM","IRON","MANGANESE","SULFATE","CHLORIDE","FLUORIDE","NITRATE","AMMONIA AS N","ALKALINITY, TOTAL (AS CACO3)","pH","TOTAL DISSOLVED SOLIDS"))
+
+##########################################
+# filter to dissolved ('D') or 'N'
+# ########################################
+df_l <-  dplyr::filter(df_l,df_l$fraction %in% c("N","D"))
+
+##########################
+# Just selecting columns to work with to keep next steps clean/small
+##########################
+df_l <- dplyr::select(df_l, sys_loc_code, Date, chemical_name, Value)
+
+df_p <- rbind(df_p,df_l)
+
+#############################
+# read drinking water well field data file
+#############################
+# df <- read_excel(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',dw_field_file),'Sheet1')
+df <- read.xlsx(paste0('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/',dw_field_file),'Sheet1')
+df$measurement_date <-  as.POSIXct(df$measurement_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+
+##################################################
+# identify which quarter each value corresponds to
+##################################################
+df$Quarter <- quarter(df$measurement_date)
+
+# add year and month to be complete
+df$Year <- year(df$measurement_date)
+df$Month <- month(df$measurement_date)
+df$Date <- as.Date(df$measurement_date)
+
+# filter to year and quarter specified above
+# df <-  dplyr::filter(df,Year == year)
+# df <-  dplyr::filter(df,Month >6 & Month <10)
+df <- dplyr::filter(df,Year==year & Quarter == quarter)
+
+df_f <- df
+
+########################################################
+# remove duplicates - not sure this is foolproof or if
+# duplicates should be averaged
+########################################################
+df_f$dup <- ifelse(substr(df_f$sys_sample_code,nchar(df_f$sys_sample_code),nchar(df_f$sys_sample_code))=='D','dup','S')
+
+df_f <- dplyr::filter(df_f,dup =='S')
+
+##########################
+# Just selecting columns to work with to keep next steps clean/small
+##########################
+df_f$Value <- df_f$param_value
+df_f <- dplyr::select(df_f, sys_loc_code, Date,param_code, Value)
+
+# rename some columns so we can bind the lab and field data together
+# df_f <- dplyr::rename(df_f, report_result_value = 'param_value', chemical_name = 'param_code' )
+df_f <- dplyr::rename(df_f, chemical_name = 'param_code' )
+
+df_p <- rbind(df_p,df_f)
+
+# rename some parameters (shorter names)
+df_p$chemical_name <- ifelse(df_p$chemical_name == "ALKALINITY, TOTAL (AS CACO3)","ALKALINITY",df_p$chemical_name)
+df_p$chemical_name <- ifelse(df_p$chemical_name == "AMMONIA AS N","AMMONIA",df_p$chemical_name)
+df_p$chemical_name <- ifelse(df_p$chemical_name == "COND (F)","CONDUCTANCE",df_p$chemical_name)
+df_p$chemical_name <- ifelse(df_p$chemical_name == "PH (F)","pH",df_p$chemical_name)
+df_p$chemical_name <- ifelse(df_p$chemical_name == "TOTAL DISSOLVED SOLIDS","TDS",df_p$chemical_name)
+
+###############################
+# spread for calculations
+# duplicate field data present - can't spread yet
+###############################
+# df_ps <- spread(df_p,key="chemical_name",value="report_result_value")
+df_ps <- spread(df_p,key="chemical_name",value="Value")
+
+df_ps$BICARBONATE <- (df_ps$ALKALINITY/((1+(2*(10^-10.3)/10^-df_ps$pH))*50))*61
+df_ps$CARBONATE <- (df_ps$ALKALINITY/((2+(10^-df_ps$pH/(10^-10.3)))*50))*60
+
+PD <- transform(df_ps, Ca.meq = conc2meq(CALCIUM, "calcium"),
+                Mg.meq = conc2meq(MAGNESIUM, "magnesium"),
+                Na.meq = conc2meq(SODIUM, "sodium"),
+                Cl.meq = conc2meq(CHLORIDE, "chloride"),
+                SO4.meq = conc2meq(SULFATE, "sulfate"),
+                Mn.meq = conc2meq(MANGANESE, "manganese"),
+                K.meq = conc2meq(POTASSIUM, "potassium"),
+                Fe.meq = conc2meq(IRON, "iron"),
+                NH3.meq = conc2meq(AMMONIA, "ammonia as n"),
+                NO3.meq = conc2meq(NITRATE, "nitrate as n"),
+                CO3.meq = conc2meq(CARBONATE, "carb"),
+                HCO3.meq = conc2meq(BICARBONATE, "bicarb"))
+
+##################################
+# Let's check MW-2
+# method above validated on Table 6 Vashon Q3 2017
+##################################
+tmp <- PD %>% dplyr::filter(sys_loc_code == 'MW-2')
+# cations 
+tmp2 <- tmp %>% dplyr::select(sys_loc_code, 'Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq') %>% 
+  gather('Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq',key='cations',value='MEQ')
+# anions 
+tmp3 <- tmp %>% dplyr::select(sys_loc_code,'CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq') %>% 
+  gather('CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq',key='cations',value='MEQ')
+#########################################################
+
+##################################
+# Let's check DW-85
+# method above validated on Table 14 Vashon Q3 2017
+##################################
+tmp <- PD %>% dplyr::filter(sys_loc_code == 'DW-85')
+# cations 
+tmp2 <- tmp %>% dplyr::select(sys_loc_code, 'Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq') %>% 
+  gather('Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq',key='cations',value='MEQ')
+# anions 
+tmp3 <- tmp %>% dplyr::select(sys_loc_code,'CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq') %>% 
+  gather('CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq',key='cations',value='MEQ')
+#########################################################
+
+####################################################
+# calculate total cations and anions, total ions, 
+# cation/anion ratio and percent difference
+######################################################
+
+##########################
+# first need to rearrange PD and add factors for cations and anions
+cations <- PD %>% dplyr::select(sys_loc_code, Date, 'Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq') %>% 
+  gather('Ca.meq','Mg.meq','K.meq','Na.meq','Fe.meq','Mn.meq','NH3.meq',key='cations',value='MEQ')
+# anions (NO3 doesn't check out)
+anions <- PD %>% dplyr::select(sys_loc_code,Date,'CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq') %>% 
+  gather('CO3.meq','HCO3.meq','Cl.meq','NO3.meq','SO4.meq',key='cations',value='MEQ')
+
+# add factors
+cations$ion <- factor("Cation")
+anions$ion <- factor("Anion")
+
+# bind together
+ions <- rbind(cations,anions)
+
+ion.summary <- ions %>% dplyr::group_by(sys_loc_code, Date) %>% 
+  dplyr::summarize(total_anions = sum(MEQ[ion=='Anion']),
+                   total_cations = sum(MEQ[ion=='Cation']),
+                   total_ions = sum(MEQ),
+                   cation_anion_ratio = total_cations/total_anions,
+                   percent_difference = (total_cations-total_anions)/(total_cations+total_anions)*100)
+
+# pull out just concentration data
+cations_mg_L <- PD %>% dplyr::select(sys_loc_code, Date, 'CALCIUM','MAGNESIUM','POTASSIUM','SODIUM','IRON','MANGANESE','AMMONIA','pH','CONDUCTANCE','TDS') %>% 
+  gather('CALCIUM','MAGNESIUM','POTASSIUM','SODIUM','IRON','MANGANESE','AMMONIA','pH','CONDUCTANCE','TDS',key='parameter',value='conc')
+# anions (NO3 doesn't check out)
+anions_mg_L <- PD %>% dplyr::select(sys_loc_code,Date,'CARBONATE','BICARBONATE','CHLORIDE','NITRATE','SULFATE') %>% 
+  gather('CARBONATE','BICARBONATE','CHLORIDE','NITRATE','SULFATE',key='parameter',value='conc')
+
+#########################################
+# piper charts
+#########################################
+#
+# Combine some of the cations and anions
+# Na + K
+PD$Na.meq <- PD$Na.meq + PD$K.meq
+# HCO3 + CO3
+PD$HCO3.meq <- PD$HCO3.meq + PD$CO3.meq
+# What about combining these? 
+# Cl + NO3 ? Fe, Mn ? NH3?
+# Not included in piper diagram per Sampling and Analysis Plan 
+
+# filter to selected groundwater well monitoring sites
+# Figure 1
+PD_fig1 <-  dplyr::filter(PD,df_ps$sys_loc_code %in% c("MW-12","MW-19","MW-26","MW-29","MW-7"))
+
+# setPDF(layout = "portrait", basename = "Figure_1", multiplefiles = FALSE)
+ setPNG('Figure_1.png',7,7)
+
+PD_fig1$SS <- PD_fig1$sys_loc_code
+AA.pl <- with(PD_fig1, piperPlot(Ca.meq, Mg.meq, Na.meq,
+                            Cl.meq, HCO3.meq, SO4.meq,
+                            # Plot=list(name=SS, color=setColor(SS),
+                            Plot=list(name=SS, color=c('black','red','green','gray50','blue'),symbol=c('circle','square','uptri','diamond','downtri')),
+                            x.yCat.title = "Calcium (Ca) + Magnesium (Mg)",
+                            x.zAn.title = "Sulfate (SO4) + Chloride (Cl)",
+                            xCat.title = "Calcium (Ca)",
+                            yCat.title = "Magnesium (Mg)",
+                            zCat.title = "Sodium (Na) + Potassium (K)",
+                            xAn.title = "Chloride (Cl)",
+                            yAn.title = "Carbonate (CO3) + Bicarbonate (HCO3)",
+                            zAn.title = "Sulfate (SO4)"))
+addExplanation(AA.pl, where="ur", title="")
+# Required call to close PDF output graphics
+ graphics.off()
+
+# filter to selected groundwater well monitoring sites
+# Figure 2
+PD_fig2 <-  dplyr::filter(PD,df_ps$sys_loc_code %in% c("MW-2","MW-20","MW-21","MW-8","MW-9"))
+
+#setPDF(layout = "portrait", basename = "Figure_2", multiplefiles = FALSE)
+setPNG('Figure_2.png',7,7)
+
+PD_fig2$SS <- PD_fig2$sys_loc_code
+AA.pl <- with(PD_fig2, piperPlot(Ca.meq, Mg.meq, Na.meq,
+                                 Cl.meq, HCO3.meq, SO4.meq,
+                                 # Plot=list(name=SS, color=setColor(SS)),
+                                 Plot=list(name=SS, color=c('black','red','green','gray50','blue'),symbol=c('circle','square','uptri','diamond','downtri')),
+                                 x.yCat.title = "Calcium (Ca) + Magnesium (Mg)",
+                                 x.zAn.title = "Sulfate (SO4) + Chloride (Cl)",
+                                 xCat.title = "Calcium (Ca)",
+                                 yCat.title = "Magnesium (Mg)",
+                                 zCat.title = "Sodium (Na) + Potassium (K)",
+                                 xAn.title = "Chloride (Cl)",
+                                 yAn.title = "Carbonate (CO3) + Bicarbonate (HCO3)",
+                                 zAn.title = "Sulfate (SO4)"))
+addExplanation(AA.pl, where="ur", title="")
+# Required call to close PDF output graphics
+graphics.off()
+
+# filter to selected groundwater well monitoring sites
+# Figure 3
+PD_fig3 <-  dplyr::filter(PD,df_ps$sys_loc_code %in% c("MW-10","MW-13","MW-4"))
+
+#setPDF(layout = "portrait", basename = "Figure_3", multiplefiles = FALSE)
+setPNG('Figure_3.png',7,7)
+
+PD_fig3$SS <- PD_fig3$sys_loc_code
+AA.pl <- with(PD_fig3, piperPlot(Ca.meq, Mg.meq, Na.meq,
+                                 Cl.meq, HCO3.meq, SO4.meq,
+                                 # Plot=list(name=SS, color=setColor(SS)),
+                                 Plot=list(name=SS, color=c('black','red','green'),symbol=c('circle','square','uptri')),
+                                 x.yCat.title = "Calcium (Ca) + Magnesium (Mg)",
+                                 x.zAn.title = "Sulfate (SO4) + Chloride (Cl)",
+                                 xCat.title = "Calcium (Ca)",
+                                 yCat.title = "Magnesium (Mg)",
+                                 zCat.title = "Sodium (Na) + Potassium (K)",
+                                 xAn.title = "Chloride (Cl)",
+                                 yAn.title = "Carbonate (CO3) + Bicarbonate (HCO3)",
+                                 zAn.title = "Sulfate (SO4)"))
+addExplanation(AA.pl, where="ur", title="")
+# Required call to close PDF output graphics
+graphics.off()
+
+# filter to selected groundwater well monitoring sites
+# Figure 5
+PD_fig5 <-  dplyr::filter(PD,df_ps$sys_loc_code %in% c("DW-85","DW-PA"))
+# No data for these wells
+
+# setPDF(layout = "portrait", basename = "Figure_5", multiplefiles = FALSE)
+setPNG('Figure_5.png',7,7)
+
+PD_fig5$SS <- PD_fig5$sys_loc_code
+AA.pl <- with(PD_fig5, piperPlot(Ca.meq, Mg.meq, Na.meq,
+                                 Cl.meq, HCO3.meq, SO4.meq,
+                                 # Plot=list(name=SS, color=setColor(SS)),
+                                 Plot=list(name=SS, color=c('black','red'),symbol=c('circle','square')),
+                                 x.yCat.title = "Calcium (Ca) + Magnesium (Mg)",
+                                 x.zAn.title = "Sulfate (SO4) + Chloride (Cl)",
+                                 xCat.title = "Calcium (Ca)",
+                                 yCat.title = "Magnesium (Mg)",
+                                 zCat.title = "Sodium (Na) + Potassium (K)",
+                                 xAn.title = "Chloride (Cl)",
+                                 yAn.title = "Carbonate (CO3) + Bicarbonate (HCO3)",
+                                 zAn.title = "Sulfate (SO4)"))
+addExplanation(AA.pl, where="ur", title="")
+# Required call to close PDF output graphics
+graphics.off()
+
+```
+
+
+```{r vashon_groundwater_screening, echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+# compare groundwater well data to screening values
+# Starting from machine readable file
+
+library(readxl)
+library(openxlsx)
+library(tidyr)
+library(lubridate)
+
+year <- 2017
+quarter <- 3
+
+#############################
+# read groundwter well data file
+#############################
+# df <- read_excel('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/VALF 3Q2017 GW Data.xlsx','Sheet1')
+df <- read.xlsx('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/VALF 3Q2017 GW Data.xlsx','Sheet1')
+# convert character sample date to POSIXct
+df$sample_date <-  as.POSIXct(df$sample_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+
+#########################
+# Using the detection limit value 
+# Could add code here to use 1/2 or whatever..
+#########################
+
+##########################
+# spread not working because there are duplicate results here
+# duplicates are dissolved and total results
+# not sure whether dissolved or total values are fed into screening
+# will use total for now
+###########################
+
+# filter to total ('T') or 'N' (selecting N and total)
+df_p <-  dplyr::filter(df,df$fraction %in% c("N","T"))
+
+# filter out Fe and Mn and pH
+df_p <- df_p %>% dplyr::filter(!chemical_name %in% c("IRON","MANGANESE","pH"))
+
+######################################
+# read screening values
+# 
+######################################
+# gwc <- read_excel('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/Screening_Levels.xlsx','GWC')
+gwc <- read.xlsx('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/Screening_Levels.xlsx','GWC')
+
+# merge with data
+dfm <- merge(gwc, df_p, by.x = "Parameter", by.y = "chemical_name", all.y = TRUE)
+
+dfm$GWC_Exceedance <- ifelse(dfm$report_result_value>dfm$GWC_Criterion,TRUE,FALSE)
+
+# view exceedances
+gwc_exceed <- dfm %>% 
+  dplyr::select(sys_loc_code,Parameter,sample_date,fraction,report_result_value,report_result_unit,detect_flag,GWC_Criterion,GWC_Exceedance, Category_02) %>% 
+  dplyr::filter(GWC_Exceedance==TRUE) 
+
+################################
+# extract dissolved Fe and Mn data and screen values
+#
+################################
+# filter to dissolved ('D') Fe and Mn 
+df_p <-  df %>% 
+  dplyr::filter(fraction %in% c("D") & chemical_name %in% c("IRON","MANGANESE"))
+
+# merge with data
+dfm <- merge(gwc, df_p, by.x = "Parameter", by.y = "chemical_name", all.y = TRUE)
+
+dfm$GWC_Exceedance <- ifelse(dfm$report_result_value>dfm$GWC_Criterion,TRUE,FALSE)
+
+# view exceedances
+gwc_exceed_D <- dfm %>% 
+  dplyr::select(sys_loc_code,Parameter,sample_date,fraction,report_result_value,report_result_unit,detect_flag,GWC_Criterion,GWC_Exceedance, Category_02) %>% 
+  dplyr::filter(GWC_Exceedance==TRUE) 
+
+gwc_exceed <- rbind(gwc_exceed,gwc_exceed_D)
+
+################################
+# read in field data 
+# filter data to 3rd Q 2017
+# and extract pH and conductivity data and screen values
+#
+################################
+df <- read.xlsx('//kc.kingcounty.lcl/dnrp/WLRD/Users/UsersSTS1/degaspec/R/myrepo/VALF - GW Field Data - 20000101 to 20180426.xlsx','Sheet1')
+# convert character sample date to POSIXct
+df$sample_date <-  as.POSIXct(df$measurement_date * (60*60*24), origin="1899-12-30", tz="America/Los_Angeles")
+df$Year <- year(df$sample_date)
+df$Quarter <- quarter(df$sample_date)
+df <- dplyr::filter(df,Year==year & Quarter == quarter)
+df$report_result_value <- df$param_value
+df$fraction <- "N"
+df$report_result_unit <- df$param_unit
+df$detect_flag <- "Y"
+
+unique(df$param_code)
+
+# add Parameter field that matches screening table 
+df$Parameter <- ifelse(df$param_code == "PH (F)","pH",df$param_code)
+df$Parameter <- ifelse(df$param_code == "COND (F)","SPECIFIC CONDUCTANCE",df$Parameter)
+
+unique(df$Parameter)
+
+# filter to conductance
+df_p <-  df %>% 
+  dplyr::filter(Parameter %in% c("SPECIFIC CONDUCTANCE"))
+
+# merge with data
+dfm <- merge(gwc, df_p, by = "Parameter", all.y = TRUE)
+
+dfm$GWC_Exceedance <- ifelse(dfm$report_result_value>dfm$GWC_Criterion,TRUE,FALSE)
+
+# view exceedances
+gwc_exceed_cond <- dfm %>% 
+  dplyr::select(sys_loc_code,Parameter,sample_date,fraction,report_result_value,report_result_unit,detect_flag,GWC_Criterion,GWC_Exceedance, Category_02) %>% 
+  dplyr::filter(GWC_Exceedance==TRUE) 
+
+gwc_exceed <- rbind(gwc_exceed,gwc_exceed_cond)
+
+# filter to pH
+df_p <-  df %>% 
+  dplyr::filter(Parameter %in% c("pH"))
+
+# merge with data
+dfm <- merge(gwc, df_p, by = "Parameter", all.y = TRUE)
+
+# filter for minimum pH
+dfm_pH <-  dfm %>% 
+  dplyr::filter(GWC_Criterion == 6.5)
+
+dfm_pH$GWC_Exceedance <- ifelse(dfm_pH$report_result_value<dfm_pH$GWC_Criterion,TRUE,FALSE)
+
+# view exceedances
+gwc_exceed_pH <- dfm_pH %>% 
+  dplyr::select(sys_loc_code,Parameter,sample_date,fraction,report_result_value,report_result_unit,detect_flag,GWC_Criterion,GWC_Exceedance, Category_02) %>% 
+  dplyr::filter(GWC_Exceedance==TRUE) 
+
+gwc_exceed <- rbind(gwc_exceed,gwc_exceed_pH)
+
+# filter for maximum pH
+dfm_pH <-  dfm %>% 
+  dplyr::filter(GWC_Criterion == 8.5)
+
+dfm_pH$GWC_Exceedance <- ifelse(dfm_pH$report_result_value>dfm_pH$GWC_Criterion,TRUE,FALSE)
+
+# view exceedances
+gwc_exceed_pH <- dfm_pH %>% 
+  dplyr::select(sys_loc_code,Parameter,sample_date,fraction,report_result_value,report_result_unit,detect_flag,GWC_Criterion,GWC_Exceedance, Category_02) %>% 
+  dplyr::filter(GWC_Exceedance==TRUE) 
+
+gwc_exceed <- rbind(gwc_exceed,gwc_exceed_pH)
+
+```
+
+**Summary of Quarterly Water Quality for the Vashon Island Closed Landfill for the `r quarters[quarter]` Quarter of `r year`**
+
+This report contains quarterly environmental monitoring results and an evaluation ofgroundwater water quality for Vashon Island Landfill. In December 2004, the Vashon Island Landfill Hydrogeologic Report Update was published, providing a revision to the hydrogeologic report.
+
+Environmental samples were collected and analyzed in accordance with the Environmental Monitoring Sampling and Analysis Plan for Vashon Island Closed Landfill December 2015 (SAP). This document contains procedures to ensure data quality, consistency and documentation.
+
+Laboratory data was reviewed as outlined in the SAP for compliance with Data QualityObjectives (DQOs) and Quality Assurance/Quality Control (QA/QC). No quality control issues were identified for this quarter.
+
+Groundwater quality is evaluated by comparison of analysis results to regulatory standards, geochemical analysis and statistical evaluation. A notable change in this quarterly report involves the methodology for the analytical testing covered by SW-846 (Test Methods forEvaluating Solid Waste). The previous Method Detection Limit (MDL) methodology was concluded and the Lower Limit of Quantitation (LLOQ) was implemented in 2017.
+
+The LLOQ is the lowest point on a calibration curve that can be used for quantification. It is a method that repeatedly tests and calibrates against known standards such as reagent water, method blanks, etc. Ultimately, the LLOQ’s ability to detect an analyte at a specific concentration is dependent upon factors such as instrument sensitivity and can, at times, be greater than the baseline curve concentration.
+
+Four new wells (MW-33, MW-34, MW-35, and MW-36) were drilled in 2015 and are being evaluated. Recommendations to add them or not to add them to the monitoring network will be submitted with the hydrogeological model update as part of the Remedial Investigation Report due in 2018. Following is a brief description of each.
+
+# Regulatory Standards
+
+Groundwater results are compared to Federal Drinking Water Maximum Contaminant Limits (MCLs), 40 CFR Parts 141 and 143 and Washington State Groundwater Quality Criteria, WAC 173-200. Seep and surface water monitoring results are compared to WAC 173-201A, Water Quality Standards for Surface Waters of the State of Washington and 40 CFR Parts 131 (see Appendix B).
+
+# Analytical Methods
+
+## Trilinear Diagrams and Major Ion Balance
+
+Geochemical data is presented on trilinear diagrams. Major cations and anions are plotted on individual triangles as percentages of total milliequivalents per liter (meq/L).These diagrams illustrate differences in major ion chemistry between groundwater samples and can be used to categorize water composition into identifiable groups or hydrochemical facies. These hydrochemical facies reflect distinct compositions of cation and anion concentrations. The value of the diagram lies in pointing out relationships that exist among individual samples. Trilinear Diagrams are included with ionic balance calculations in this report.
+
+## Interwell and Intrawell Prediction Limits
+
+Both interwell and intrawell prediction limit methods are used in evaluating groundwater data at Vashon Island Closed Landfill. The interwell prediction limit is a statistical test that compares an analytical result from a down gradient well to a computed limit value derived from past analytical results from an upgradient well, considered to be representative background data. The prediction limits generated in this report are based on a 1% false positive rate (type I error) and depend on the background distribution. For each parameter tested, the background data set is the entire monitoring history for the upgradient well.
+
+The intrawell prediction limit is a statistical test that compares an analytical result to a computed limit value derived from past analytical results from the same well, considered representative historical well data. The prediction limits generated in this report are based on a 1% false positive rate (type I error) and depend on the background distribution. For each parameter tested, the background data set is the entire monitoring history for the well.
+
+Both of the prediction limits are recalculated annually; adding in the previous year’s sampling results. The data set is tested for normality by application of the Shapiro-Wilk Test for Normality. If the data fail the test for normality, several transformations of the data are tested. When normal or transformed normal data sets are determined, a parametric interwell prediction limit is calculated and future results compared to this value. When transformations fail the test for normality, a non-parametric method is applied and future results are compared to this limit.
+
+# Results and Analysis
+
+## Groundwater
+ 
+### Regional Aquifer & Channel Cc3 
+
+The wells screened in the regional aquifer are MW-7, MW-12, MW-19, MW-26, MW-28,MW-29 and piezometer MW-25. MW-7 is located outside of the landfill and is not considered related to landfill activities. It is currently used to calculate prediction limits and background data comparison. Monitoring well MW-28 was observed to be dry when waterlevels were recorded this quarter.
+
+Groundwater quality data for the regional aquifer samples collected during the `r tolower(quarters[quarter])` quarter of `r year` are consistent with previous samples. Groundwater elevations are within historical ranges. The potentiometric map for this report refers to the Regional aquifer as Unit D in accordance with the Remedial Investigation Report due in 2018. This quarterly report maintains the identification as the Regional aquifer.
+
+The trilinear diagram shows all samples are within the same calcium-magnesium bicarbonate hydrochemical facie (see Figure 1). During this quarter, the ionic balances for the wells in this zone are within ten percent (see Table 2), which is sufficient for characterization.
+
+Exceedances of primary and secondary regulatory standards are tabulated and presented (seeTable 3). All exceedances are consistent with reported analyses in past quarterly reports. Arsenic was in exceedance in all monitoring wells in this zone. Iron exceeded the standard in well MW-29. Sample results from MW-7, MW-19, MW-26, and MW-29 have exceeded for manganese. All three are chemicals that occur naturally in groundwater of this region and therefore are believed to be representative of groundwater quality unaffected by Vashon Island Closed Landfill.
+
+Wells located in the Regional Aquifer and Channel Cc3 use the intrawell prediction limit method to determine prediction limit exceedances which are tabulated and presented in Table 4. These prediction limits have been calculated to include all sample results through 2016. There were calcium exceedances from this quarter’s samples at monitoring wells MW-12 and MW-29.
+
+There were no volatile organic detections this quarter.
+
+### Groundwater Within & Below Channel Cc2
+
+
+### Groundwater Within & Adjacent to Channel Cc1
+
+
+## Weirs
+
+
+## Offsite Private Wells
+
+
+## Landfill Gas
+
+
+![](Figure_1.png)
+**Figure 1. Vashon Landfill. Channel**
+**Channel Cc3 Wells Third Quarter 2017**
+
+```{r table_2, echo=FALSE}
+
+ table_2 <- subset(ion.summary,ion.summary$sys_loc_code %in% c("MW-12","MW-19","MW-26","MW-29","MW-7"))
+ table_2 <- table_2 %>% dplyr::rename("Well #" = sys_loc_code, "Total Anions (meq/L)" =  total_anions, "Total Cations (meq/L)" = total_cations, "Total Ions (meq/L)" = total_ions, "Cation/Anion Ratio" = cation_anion_ratio, "Percent Difference" = percent_difference)
+
+kable(table_2,caption="Table 2 Ion Balance for Groundwater Wells Within Regional Aquifer & Channel Cc3",align=rep('c', 6),digits = c(0, 0, 2, 2, 2, 2, 2)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "3cm")
+  
+```
+
+```{r table_3, echo=FALSE}
+
+gwc_exceed$sample_date <- as.Date(gwc_exceed$sample_date)
+ 
+table_3 <- gwc_exceed %>% dplyr::filter(sys_loc_code %in% c("MW-12","MW-19","MW-26","MW-29","MW-7") & detect_flag == "Y")
+
+ table_3 <- table_3 %>% dplyr::rename("Site ID" = sys_loc_code, "Sample Date" = sample_date, "Sample Value" = report_result_value, "Standard(s) Exceeded Numerical Limit" = GWC_Criterion, "Units" = report_result_unit, "Standard(s) Exceeded" = Category_02)
+ 
+ table_3 <- table_3 %>% dplyr::select(Parameter, Units, "Site ID","Sample Date", "Sample Value", "Standard(s) Exceeded", "Standard(s) Exceeded Numerical Limit") %>%  dplyr::arrange(Parameter,`Site ID`)
+
+kable(table_3,caption="Table 3 Vashon Closed Landfill Summary of Exceedances of Groundwater Quality Criteria July 1, 2017 to September 31, 2017 Regional Aquifer & Channel Cc3",align=rep('c', 7),digits = c(0, 0, 0, 0, 5, 0, 5)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "2cm") %>%
+  column_spec(7, width = "3cm")
+  
+```
+![](Figure_2.png)
+**Figure 2. Vashon Landfill. Channel**
+**Channel Cc2 Wells Third Quarter 2017**
+
+```{r table_6, echo=FALSE}
+
+ table_2 <- subset(ion.summary,ion.summary$sys_loc_code %in% c("MW-2","MW-20","MW-21","MW-8","MW-9"))
+ table_2 <- table_2 %>% dplyr::rename("Well #" = sys_loc_code, "Total Anions (meq/L)" =  total_anions, "Total Cations (meq/L)" = total_cations, "Total Ions (meq/L)" = total_ions, "Cation/Anion Ratio" = cation_anion_ratio, "Percent Difference" = percent_difference)
+
+kable(table_2,caption="Table 6 Ion Balance for Groundwater Wells Within and Between Channel Cc2",align=rep('c', 6),digits = c(0, 0, 2, 2, 2, 2, 2)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "3cm")
+  
+```
+```{r table_7, echo=FALSE}
+
+gwc_exceed$sample_date <- as.Date(gwc_exceed$sample_date)
+ 
+table_3 <- gwc_exceed %>% dplyr::filter(sys_loc_code %in% c("MW-2","MW-20","MW-21","MW-8","MW-9") & detect_flag == "Y")
+
+ table_3 <- table_3 %>% dplyr::rename("Site ID" = sys_loc_code, "Sample Date" = sample_date, "Sample Value" = report_result_value, "Standard(s) Exceeded Numerical Limit" = GWC_Criterion, "Units" = report_result_unit, "Standard(s) Exceeded" = Category_02)
+ 
+ table_3 <- table_3 %>% dplyr::select(Parameter, Units, "Site ID","Sample Date", "Sample Value", "Standard(s) Exceeded", "Standard(s) Exceeded Numerical Limit") %>%  dplyr::arrange(Parameter,`Site ID`)
+
+kable(table_3,caption="Table 7 Vashon Closed Landfill Summary of Exceedances of Groundwater Quality Criteria July 1, 2017 to September 31, 2017 Groundwater Within & Below Channel Cc2",align=rep('c', 7),digits = c(0, 0, 0, 0, 5, 0, 5)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "2cm") %>%
+  column_spec(7, width = "3cm")
+  
+```
+
+![](Figure_3.png)
+**Figure 3. Vashon Landfill. Channel**
+**Channel Cc1 Wells Third Quarter 2017**
+
+
+```{r table_10, echo=FALSE}
+
+ table_2 <- subset(ion.summary,ion.summary$sys_loc_code %in% c("MW-10","MW-13","MW-4"))
+ table_2 <- table_2 %>% dplyr::rename("Well #" = sys_loc_code, "Total Anions (meq/L)" =  total_anions, "Total Cations (meq/L)" = total_cations, "Total Ions (meq/L)" = total_ions, "Cation/Anion Ratio" = cation_anion_ratio, "Percent Difference" = percent_difference)
+
+kable(table_2,caption="Table 10 Ion Balance for Groundwater Wells Within or Adjacent to Channel Cc1",align=rep('c', 6),digits = c(0, 0, 2, 2, 2, 2, 2)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "3cm")
+  
+```
+```{r table_11, echo=FALSE}
+
+gwc_exceed$sample_date <- as.Date(gwc_exceed$sample_date)
+ 
+table_3 <- gwc_exceed %>% dplyr::filter(sys_loc_code %in% c("MW-10","MW-13","MW-4") & detect_flag == "Y")
+
+ table_3 <- table_3 %>% dplyr::rename("Site ID" = sys_loc_code, "Sample Date" = sample_date, "Sample Value" = report_result_value, "Standard(s) Exceeded Numerical Limit" = GWC_Criterion, "Units" = report_result_unit, "Standard(s) Exceeded" = Category_02)
+ 
+ table_3 <- table_3 %>% dplyr::select(Parameter, Units, "Site ID","Sample Date", "Sample Value", "Standard(s) Exceeded", "Standard(s) Exceeded Numerical Limit") %>%  dplyr::arrange(Parameter,`Site ID`)
+
+kable(table_3,caption="Table 3 Vashon Closed Landfill Summary of Exceedances of Groundwater Quality Criteria July 1, 2017 to September 31, 2017 Groundwater Within & Adjacent to Channel Cc1",align=rep('c', 7),digits = c(0, 0, 0, 0, 5, 0, 5)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "2cm") %>%
+  column_spec(7, width = "3cm")
+  
+```
+
+![](Figure_5.png)
+**Figure 5. Vashon Landfill. Channel**
+**Private Wells Third Quarter 2017**
+
+```{r table_14, echo=FALSE}
+
+ table_2 <- subset(ion.summary,ion.summary$sys_loc_code %in% c("DW-85","DW-PA"))
+ table_2 <- table_2 %>% dplyr::rename("Well #" = sys_loc_code, "Total Anions (meq/L)" =  total_anions, "Total Cations (meq/L)" = total_cations, "Total Ions (meq/L)" = total_ions, "Cation/Anion Ratio" = cation_anion_ratio, "Percent Difference" = percent_difference)
+
+kable(table_2,caption="Table 14 Ion Balance for Private Wells",align=rep('c', 6),digits = c(0, 0, 2, 2, 2, 2, 2)) %>% kable_styling("striped", full_width = F) %>%
+  column_spec(1, width = "3cm") %>%
+  column_spec(2, width = "3cm")
+  
+```
